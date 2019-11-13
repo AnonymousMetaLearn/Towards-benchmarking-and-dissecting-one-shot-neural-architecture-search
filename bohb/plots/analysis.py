@@ -1,7 +1,8 @@
 import os
 import itertools
 import argparse
-#from IPython import embed
+import pickle
+import collections
 
 import result as hpres
 import hpbandster.visualization as hpvis
@@ -27,6 +28,23 @@ parser.add_argument('--working_directory', type=str, help='directory where to'
 parser.add_argument('--space', type=int, default=1, help='NASBench space')
 parser.add_argument('--seed', type=int, default=1, help='Seed')
 args = parser.parse_args()
+
+s1_min = 0.05448716878890991
+s2_min = 0.057592153549194336
+s3_min = 0.05338543653488159
+
+Architecture = collections.namedtuple('Architecture', ['adjacency_matrix', 'node_list'])
+
+class Model(object):
+    def __init__(self):
+        self.validation_accuracy = None
+        self.test_accuracy = None
+        self.training_time = None
+        self.arch = None
+
+    def __str__(self):
+        """Prints a readable version of this bitstring."""
+        return '{0:b}'.format(self.arch)
 
 
 def extract_HB_learning_curves(runs):
@@ -128,6 +146,12 @@ def fanova_analysis():
         )
         os.makedirs(dir, exist_ok=True)
 
+        dir_overleaf = './fANOVA_1/'
+        os.makedirs(dir_overleaf, exist_ok=True)
+        fig_name = './fANOVA_1'+'/s%d-run%d-seed%d-%d.png'%(
+            args.space, args.run_id, args.seed, b
+        )
+
         vis = fanova.visualizer.Visualizer(f, new_cs, dir, y_label='Validation Error')
 
         print(b)
@@ -166,6 +190,10 @@ def fanova_analysis():
             fig.ylim(ylims)
 
             importance = f.quantify_importance([n1,n2])[(n1,n2)]['total importance']
+            #fig.title("importance %3.1f%%"%(importance*100))
+            fig.title("Space %d, Budget: %d epochs"%(args.space, b))
+            fig.tight_layout()
+            fig.savefig(fig_name)
             fig.title("importance %3.1f%%"%(importance*100))
             fig.tight_layout()
             fig.savefig(dir+'/%s_%s.png'%(n1,n2))
@@ -185,12 +213,53 @@ def trajectory_plot():
     for b,c in zip(budgets, ['gray','blue', 'orange']):
         run_points = np.array([
             (r.time_stamps['finished']+(r.info['runtime'][0]*60),
+                                 r.info['test_error'][0] - eval('s{}_min'.format(args.space)) ) for r in runs_by_budget[b]])
                                  r.info['test_error'][0] ) for r in
                                runs_by_budget[b]])
         plt.scatter(
             run_points[:,0], run_points[:,1], color=c,
             label='budget = %i epochs'%b, s=75
         )
+
+    # plot RE incumbent
+    re_path = 'regularized_evolution'
+    runs = []
+    for seed in range(6):
+        filename = os.path.join(re_path,
+                                'algo_RE_0_ssp_{}_seed_{}.obj'.format(args.space,
+                                                                      seed))
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+        runs.append(data)
+
+    accuracies = list(map(lambda x: max(x, key=lambda y: y.test_accuracy).test_accuracy,
+                          runs))
+    re_mean = np.mean(1 - np.asarray(accuracies) - eval('s{}_min'.format(args.space)))
+    re_std = np.std(1 - np.asarray(accuracies) - eval('s{}_min'.format(args.space)))
+
+    _x_values = np.arange(1800, 5e5)
+    darts_error = np.zeros(_x_values.size)
+    darts_error.fill(re_mean)
+    plt.fill_between(_x_values, darts_error+re_std, darts_error-re_std,
+                     color='g', alpha=.3)
+    plt.plot(_x_values, darts_error, color='g', label='RE')
+
+    #plt.hlines(re_mean, xmin=0, xmax=3e5, color='g')
+
+
+    #plt.scatter(inc_trajectory['times_finished'][:-1], inc_trajectory['losses'][:-1], c='red')
+    plt.xscale('log')
+    #plt.xlim([4e4, 4e5]) #s3
+    plt.xlim([5e4, 5e5]) #s1
+    #plt.xlim([5e4, 3e5]) #s2
+    plt.yscale('log')
+    #plt.ylim([5.6e-2, 1.3e-1]) #s1
+    #plt.ylim([5.8e-2, 1.5e-1]) #s2
+    plt.ylim([0.002, 2e-1]) #s3
+    plt.ylabel('test regret')
+    plt.xlabel('wallclock time [s]')
+    plt.legend(fontsize=10)
+    plt.title("Space %d"%(args.space))
 
     #plt.scatter(inc_trajectory['times_finished'][:-1], inc_trajectory['losses'][:-1], c='red')
     plt.xscale('log')

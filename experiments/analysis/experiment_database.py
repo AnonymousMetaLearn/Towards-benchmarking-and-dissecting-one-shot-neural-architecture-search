@@ -47,13 +47,15 @@ def get_key_from_scalar_configs(configs, key):
             minimum = search_space.test_min_error
         elif 'valid' in key:
             minimum = search_space.valid_min_error
+        else:
+            raise ValueError('incorrect name in key')
     else:
         minimum = 0
 
     return np.mean(np.stack([metric[:shortest_metric] for metric in metrics_to_stack], axis=0), axis=-1) - minimum
 
 
-class ExperimentDatabase():
+class ExperimentDatabase:
     def __init__(self, root_dir):
         """Load all directories with trainings."""
         self._load(root_dir=root_dir)

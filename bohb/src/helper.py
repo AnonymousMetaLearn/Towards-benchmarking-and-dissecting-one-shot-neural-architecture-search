@@ -40,14 +40,20 @@ def configuration_darts(config, budget, min_budget, eta, config_id,
     try:
         bash_strings = ["PYTHONPATH=%s python ../optimizers/darts/train_search_bohb.py"%(darts_source),
                         "--save %s --epochs %d"%(dest_dir, int(budget)),
-                        "--data ../../data",
+                        "--data ../data",
                         "--seed {}".format(seed),
                         "--search_space {}".format(str(search_space)),
+                        "--init_channels {init_channels}".format(**config),
+                        "--layers {layers}".format(**config),
                         "--batch_size {batch_size}".format(**config),
                         "--weight_decay {weight_decay}".format(**config),
                         "--learning_rate {learning_rate}".format(**config),
                         "--momentum {momentum}".format(**config),
-                        "--cutout_prob {cutout_prob}".format(**config)]
+                        "--grad_clip {grad_clip}".format(**config),
+                        "--cutout_length {cutout_length}".format(**config),
+                        "--cutout_prob {cutout_prob}".format(**config),
+                        "--arch_learning_rate {arch_learning_rate}".format(**config),
+                        "--arch_weight_decay {arch_weight_decay}".format(**config)]
 
         subprocess.check_call( " ".join(bash_strings), shell=True)
         info = load_data(

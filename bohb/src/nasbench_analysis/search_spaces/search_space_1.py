@@ -39,7 +39,7 @@ class SearchSpace1(SearchSpace):
         return upscale_to_nasbench_format(self._create_adjacency_matrix_with_loose_ends(parents))
 
     def sample(self):
-        adjacency_matrix_sample = self._sample_architecture(adjacency_matrix=np.zeros([6, 6]), node=OUTPUT_NODE - 1)
+        adjacency_matrix_sample = self._sample_adjacency_matrix_without_loose_ends(adjacency_matrix=np.zeros([6, 6]), node=OUTPUT_NODE - 1)
 
         if self._check_validity_of_adjacency_matrix(adjacency_matrix_sample):
             return adjacency_matrix_sample, random.choices(PRIMITIVES, k=4)

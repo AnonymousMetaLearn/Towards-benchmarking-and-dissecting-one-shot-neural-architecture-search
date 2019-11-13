@@ -13,7 +13,7 @@ class darts_base(Worker):
     def __init__(self, eta, min_budget, max_budget, search_space,
                  nasbench_data, seed, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.mainsourcepath = '/home/darts_weight_sharing_analysis/cnn'
+        self.mainsourcepath = '/home/ANONYMOUS/ICLR19/darts_weight_sharing_analysis'
         self.path = os.path.join(self.mainsourcepath, 'optimizers/darts')
         self.eta = eta
         self.min_budget = min_budget
@@ -36,19 +36,30 @@ class darts_base(Worker):
 
     @staticmethod
     def complete_config(config):
-        config['batch_size'] = 96
-        config['momentum'] = 0.9
-        config['learning_rate'] = 0.025
+        config['init_channels'] = 16
+        config['layers'] = 9
         return config
 
     @staticmethod
     def get_config_space():
         config_space=CS.ConfigurationSpace()
 
-        #config_space.add_hyperparameter(CSH.UniformFloatHyperparameter('learning_rate',
-        #                                                               lower=1e-3,
-        #                                                               upper=1,
-        #                                                               log=True))
+        config_space.add_hyperparameter(CSH.UniformFloatHyperparameter('arch_learning_rate',
+                                                                       lower=1e-5,
+                                                                       upper=1e-2,
+                                                                       log=True))
+        config_space.add_hyperparameter(CSH.UniformFloatHyperparameter('arch_weight_decay',
+                                                                       lower=1e-4,
+                                                                       upper=1e-1,
+                                                                       log=True))
+        config_space.add_hyperparameter(CSH.UniformFloatHyperparameter('learning_rate',
+                                                                       lower=1e-3,
+                                                                       upper=1,
+                                                                       log=True))
+        config_space.add_hyperparameter(CSH.UniformFloatHyperparameter('momentum',
+                                                                       lower=0,
+                                                                       upper=0.99,
+                                                                       log=False))
         config_space.add_hyperparameter(CSH.UniformFloatHyperparameter('weight_decay',
                                                                        lower=1e-5,
                                                                        upper=1e-2,
@@ -57,6 +68,18 @@ class darts_base(Worker):
                                                                        lower=0,
                                                                        upper=1,
                                                                        log=False))
+        config_space.add_hyperparameter(CSH.UniformIntegerHyperparameter('cutout_length',
+                                                                         lower=2,
+                                                                         upper=32,
+                                                                         log=True))
+        config_space.add_hyperparameter(CSH.UniformIntegerHyperparameter('batch_size',
+                                                                         lower=16,
+                                                                         upper=128,
+                                                                         log=False))
+        config_space.add_hyperparameter(CSH.UniformIntegerHyperparameter('grad_clip',
+                                                                         lower=1,
+                                                                         upper=9,
+                                                                         log=False))
 
 
         return config_space

@@ -53,27 +53,27 @@ class MixedOpPCDARTS(MixedOp):
 
 
 class ChoiceBlockPCDARTS(ChoiceBlock):
-    def __init__(self, C_in, n_inputs):
-        super(ChoiceBlockPCDARTS, self).__init__(C_in, n_inputs)
+    def __init__(self, C_in):
+        super(ChoiceBlockPCDARTS, self).__init__(C_in)
         # Use the GDAS Mixed Op instead of the DARTS Mixed op
         self.mixed_op = MixedOpPCDARTS(C_in, stride=1)
 
 
 class CellPCDARTS(Cell):
-    def __init__(self, steps, multiplier, C_prev, C, layer, search_space):
-        super(CellPCDARTS, self).__init__(steps, multiplier, C_prev, C, layer, search_space)
+    def __init__(self, steps,C_prev, C, layer, search_space):
+        super(CellPCDARTS, self).__init__(steps, C_prev, C, layer, search_space)
         # Create the choice block.
         self._choice_blocks = nn.ModuleList()
         for i in range(self._steps):
             # Use the GDAS cell instead of the DARTS cell
-            choice_block = ChoiceBlockPCDARTS(C_in=C, n_inputs=i + 1)
+            choice_block = ChoiceBlockPCDARTS(C_in=C)
             self._choice_blocks.append(choice_block)
 
 
 class PCDARTSNetwork(Network):
-    def __init__(self, C, num_classes, layers, criterion, output_weights, search_space, steps=4, multiplier=5):
+    def __init__(self, C, num_classes, layers, criterion, output_weights, search_space, steps=4):
         super(PCDARTSNetwork, self).__init__(C, num_classes, layers, criterion, output_weights, search_space,
-                                             steps=steps, multiplier=multiplier)
+                                             steps=steps)
 
         # Override the cells module list of DARTS with GDAS variants
         self.cells = nn.ModuleList()
@@ -85,7 +85,7 @@ class PCDARTSNetwork(Network):
                 # Down-sample in forward method
                 C_curr *= 2
 
-            cell = CellPCDARTS(steps, multiplier, C_prev, C_curr, layer=i, search_space=search_space)
+            cell = CellPCDARTS(steps, C_prev, C_curr, layer=i, search_space=search_space)
             self.cells += [cell]
             C_prev = C_curr
 

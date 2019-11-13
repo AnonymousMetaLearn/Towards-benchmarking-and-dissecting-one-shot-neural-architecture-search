@@ -45,7 +45,6 @@ def compute_spearman_correlation(one_shot_test_error, nb_test_error):
         correlation_at_epoch.append(stats.spearmanr(one_shot_test_error_on_epoch[0], nb_test_error).correlation)
     return correlation_at_epoch
 
-
 def read_in_correlation(path, config):
     correlation_files = glob.glob(os.path.join(path, 'correlation_*.obj'))
     # If no correlation files available

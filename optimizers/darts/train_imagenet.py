@@ -140,12 +140,13 @@ def main():
 
     best_acc_top1 = 0
     for epoch in range(args.epochs):
-        scheduler.step()
         logging.info('epoch %d lr %e', epoch, scheduler.get_lr()[0])
         model.drop_path_prob = args.drop_path_prob * epoch / args.epochs
 
         train_acc, train_obj = train(train_queue, model, criterion_smooth, optimizer)
         logging.info('train_acc %f', train_acc)
+        # Fix for PyTorch 1.1.0 different learning rate behaviour
+        scheduler.step()
 
         valid_acc_top1, valid_acc_top5, valid_obj = infer(valid_queue, model, criterion)
         logging.info('valid_acc_top1 %f', valid_acc_top1)

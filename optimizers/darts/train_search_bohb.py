@@ -21,7 +21,7 @@ from optimizers.darts.architect import Architect
 from optimizers.darts.model_search import Network
 
 parser = argparse.ArgumentParser("cifar")
-parser.add_argument('--data', type=str, default='../data', help='location of the darts corpus')
+parser.add_argument('--data', type=str, default='./data', help='location of the darts corpus')
 parser.add_argument('--batch_size', type=int, default=96, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')

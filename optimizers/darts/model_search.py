@@ -31,90 +31,99 @@ class ChoiceBlock(nn.Module):
     International Conference on Machine Learning. 2018.
     """
 
-    def __init__(self, C_in, n_inputs):
+    def __init__(self, C_in):
         super(ChoiceBlock, self).__init__()
         # Pre-processing 1x1 convolution at the beginning of each choice block.
-        self.preprocess = ConvBnRelu(C_in=C_in * n_inputs, C_out=C_in, kernel_size=1, stride=1, padding=0)
         self.mixed_op = MixedOp(C_in, stride=1)
 
     def forward(self, inputs, input_weights, weights):
         if input_weights is not None:
             # Weigh the input to the choice block
-            inputs = [w * t for w, t in zip(input_weights[0], inputs)]
+            inputs = [w * t for w, t in zip(input_weights.squeeze(0), inputs)]
 
-        # Concatenate input to choice block and apply 1x1 convolution
-        pre_inputs = self.preprocess(torch.cat(inputs, dim=1))
+        # Sum input to choice block
+        # https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L298
+        input_to_mixed_op = sum(inputs)
+
         # Apply Mixed Op
-        output = self.mixed_op(pre_inputs, weights=weights)
+        output = self.mixed_op(input_to_mixed_op, weights=weights)
         return output
 
 
 class Cell(nn.Module):
 
-    def __init__(self, steps, multiplier, C_prev, C, layer, search_space):
+    def __init__(self, steps, C_prev, C, layer, search_space):
         super(Cell, self).__init__()
         # All cells are normal cells in NASBench case.
-        if layer == 0:
-            C_in = C_prev
-        else:
-            C_in = C_prev * multiplier
-
-        # For preprocessing use the same convbnrelu function, which is what NASBench is using
-        self.preprocess = ConvBnRelu(C_in=C_in, C_out=C, kernel_size=1, stride=1, padding=0)
-
         self._steps = steps
-        self._multiplier = multiplier
 
         self._choice_blocks = nn.ModuleList()
         self._bns = nn.ModuleList()
         self.search_space = search_space
 
-        # Create the choice block.
+        self._input_projections = nn.ModuleList()
+        # Number of input channels is dependent on whether it is the first layer or not. Any subsequent layer has
+        # C_in * (steps + 1) input channels because the output is a concatenation of the input tensor and all
+        # choice block outputs
+        C_in = C_prev if layer == 0 else C_prev * (steps + 1)
+
+        # Create the choice block and the input
         for i in range(self._steps):
-            choice_block = ChoiceBlock(C_in=C, n_inputs=i + 1)
+            choice_block = ChoiceBlock(C_in=C)
             self._choice_blocks.append(choice_block)
+            self._input_projections.append(ConvBnRelu(C_in=C_in, C_out=C, kernel_size=1, stride=1, padding=0))
+
+        # Add one more input preprocessing for edge from input to output of the cell
+        self._input_projections.append(ConvBnRelu(C_in=C_in, C_out=C, kernel_size=1, stride=1, padding=0))
 
     def forward(self, s0, weights, output_weights, input_weights):
         # Adaption to NASBench
         # Only use a single input, from the previous cell
-        s0 = self.preprocess(s0)
+        states = []
 
-        states = [s0]
-        # Loop that connects all previous cells to the current one.
-        for i in range(self._steps):
+        # Loop through the choice blocks of each cell
+        for choice_block_idx in range(self._steps):
             # Select the current weighting for input edges to each choice block
             if input_weights is not None:
                 # Node 1 has no choice with respect to its input
-                if (i == 0) or (i == 1 and type(self.search_space) == SearchSpace1):
+                if (choice_block_idx == 0) or (choice_block_idx == 1 and type(self.search_space) == SearchSpace1):
                     input_weight = None
                 else:
                     input_weight = input_weights.pop(0)
 
             # Iterate over the choice blocks
-            s = self._choice_blocks[i](inputs=states, input_weights=input_weight, weights=weights[i])
+            # Apply 1x1 projection only to edges from input of the cell
+            # https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L289
+            s = self._choice_blocks[choice_block_idx](inputs=[self._input_projections[choice_block_idx](s0), *states],
+                                                      input_weights=input_weight, weights=weights[choice_block_idx])
             states.append(s)
+
+        # Add projected input to the state
+        # https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L328
+        states.insert(0, self._input_projections[-1](s0))
         assert (len(input_weights) == 0, 'Something went wrong here.')
-        # Concatenate all mixed op outputs, the slicing ignores the input op.
-        # Create weighted concatenation at the output of the cell
+
         if output_weights is None:
-            weighted_tensor_list = states[-self._multiplier:]
+            tensor_list = states
         else:
-            weighted_tensor_list = [w * t for w, t in zip(output_weights[0], states[-self._multiplier:])]
-        return torch.cat(weighted_tensor_list, dim=1)
+            # Create weighted concatenation at the output of the cell
+            tensor_list = [w * t for w, t in zip(output_weights[0], states)]
+
+        # Concatenate to form output tensor
+        # https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L325
+        return torch.cat(tensor_list, dim=1)
 
 
 class Network(nn.Module):
 
-    def __init__(self, C, num_classes, layers, criterion, output_weights, search_space, steps=4, multiplier=5):
+    def __init__(self, C, num_classes, layers, criterion, output_weights, search_space, steps=4):
         super(Network, self).__init__()
         self._C = C
         self._num_classes = num_classes
         self._layers = layers
         self._criterion = criterion
         self._steps = steps
-        self._multiplier = multiplier
         self._output_weights = output_weights
-        self.nasbench = None
         self.search_space = search_space
 
         # In NASBench the stem has 128 output channels
@@ -129,15 +138,13 @@ class Network(nn.Module):
                 # Down-sample in forward method
                 C_curr *= 2
 
-            cell = Cell(steps, multiplier, C_prev, C_curr, layer=i, search_space=search_space)
+            cell = Cell(steps=self._steps, C_prev=C_prev, C=C_curr, layer=i, search_space=search_space)
             self.cells += [cell]
             C_prev = C_curr
-
-        self.global_pooling = nn.AdaptiveAvgPool2d(1)
-        self.classifier = nn.Linear(C_prev, num_classes)
-        self.postprocess = ReLUConvBN(C_in=C_prev * multiplier, C_out=C_curr, kernel_size=1, stride=1, padding=0,
+        self.postprocess = ReLUConvBN(C_in=C_prev * (self._steps + 1), C_out=C_curr, kernel_size=1, stride=1, padding=0,
                                       affine=False)
 
+        self.classifier = nn.Linear(C_prev, num_classes)
         self._initialize_alphas()
 
     def new(self):
@@ -185,10 +192,10 @@ class Network(nn.Module):
             s0 = cell(s0, mixed_op_weights, output_weights, input_weights)
 
         # Include one more preprocessing step here
-        s0 = self.postprocess(s0)  # [N, C_max * multiplier, w, h] -> [N, C_max, w, h]
+        s0 = self.postprocess(s0)  # [N, C_max * (steps + 1), w, h] -> [N, C_max, w, h]
 
         # Global Average Pooling by averaging over last two remaining spatial dimensions
-        # Like in nasbench: https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L92
+        # https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L92
         out = s0.view(*s0.shape[:2], -1).mean(-1)
         logits = self.classifier(out.view(out.size(0), -1))
         return logits
@@ -202,10 +209,9 @@ class Network(nn.Module):
         num_ops = len(PRIMITIVES)
         self.alphas_mixed_op = Variable(1e-3 * torch.randn(self._steps, num_ops).cuda(), requires_grad=True)
 
-        # For the alphas on the output node initialize a weighting vector for all nodes in each layer.
+        # For the alphas on the output node initialize a weighting vector for all choice blocks and the input edge.
         self.alphas_output = Variable(1e-3 * torch.randn(1, self._steps + 1).cuda(), requires_grad=True)
 
-        # Search space 1 has no weight on node 2 therefore begin at node 3
         if type(self.search_space) == SearchSpace1:
             begin = 3
         else:

@@ -13,7 +13,7 @@ from hpbandster.utils import *
 import hpbandster.core.result as hputil
 
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(message)s',
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s',
                     datefmt='%H:%M:%S')
 
 parser = argparse.ArgumentParser(description='Run BOHB on CIFAR10 search space.')

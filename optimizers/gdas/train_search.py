@@ -36,6 +36,7 @@ parser.add_argument('--init_channels', type=int, default=16, help='num of init c
 parser.add_argument('--layers', type=int, default=9, help='total number of layers')
 parser.add_argument('--model_path', type=str, default='saved_models', help='path to save the model')
 parser.add_argument('--cutout', action='store_true', default=False, help='use cutout')
+parser.add_argument('--cutout_prob', type=float, default=1.0, help='cutout probability')
 parser.add_argument('--cutout_length', type=int, default=16, help='cutout length')
 parser.add_argument('--drop_path_prob', type=float, default=0.3, help='drop path probability')
 parser.add_argument('--save', type=str, default='EXP', help='experiment name')
@@ -53,9 +54,9 @@ parser.add_argument('--warm_start_epochs', type=int, default=0,
                     help='Warm start one-shot model before starting architecture updates.')
 args = parser.parse_args()
 
-args.save = 'experiments/gdas_2/search_space_{}/search-{}-{}-{}-{}'.format(args.search_space, args.save,
-                                                                           time.strftime("%Y%m%d-%H%M%S"), args.seed,
-                                                                           args.search_space)
+args.save = 'experiments/gdas_trans/search_space_{}/search-{}-{}-{}-{}-{}'.format(args.search_space, args.save,
+                                                                            time.strftime("%Y%m%d-%H%M%S"), args.seed,
+                                                                            args.learning_rate, args.search_space)
 utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
 
 # Dump the config of the run
@@ -194,6 +195,7 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, 
 
         input_search = input_search.cuda()
         target_search = target_search.cuda(non_blocking=True)
+
         # Allow for warm starting of the one-shot model for more reliable architecture updates.
         if epoch >= args.warm_start_epochs:
             architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)

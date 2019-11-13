@@ -14,6 +14,7 @@ from torch.autograd import Variable
 from nasbench_analysis.search_spaces.search_space_1 import SearchSpace1
 from optimizers.darts import utils
 from optimizers.darts.genotypes import PRIMITIVES
+# from optimizers.pc_darts.model_search import PCDARTSNetwork as Network
 from optimizers.darts.model_search import Network
 
 
@@ -323,5 +324,5 @@ class DartsWrapper:
         self.model._arch_parameters = weights
 
     def sample_arch(self):
-        adjacency_matrix, op_list = self.search_space.sample_with_loose_ends()
+        adjacency_matrix, op_list = self.search_space.sample(with_loose_ends=True, upscale=False)
         return adjacency_matrix, op_list

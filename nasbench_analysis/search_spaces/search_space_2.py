@@ -6,13 +6,17 @@ import numpy as np
 from nasbench import api
 
 from nasbench_analysis.search_spaces.search_space import SearchSpace
-from nasbench_analysis.utils import upscale_to_nasbench_format, OUTPUT_NODE, NasbenchWrapper, INPUT, OUTPUT
+from nasbench_analysis.utils import upscale_to_nasbench_format, OUTPUT_NODE, NasbenchWrapper, INPUT, CONV1X1, OUTPUT
 from optimizers.darts.genotypes import PRIMITIVES
+from optimizers.utils import Model, Architecture
 
 
 class SearchSpace2(SearchSpace):
     def __init__(self):
-        super(SearchSpace2, self).__init__(search_space_number=2, num_intermediate_nodes=4)
+        self.search_space_number = 2
+        self.num_intermediate_nodes = 4
+        super(SearchSpace2, self).__init__(search_space_number=self.search_space_number,
+                                           num_intermediate_nodes=self.num_intermediate_nodes)
         """
         SEARCH SPACE 2
         """
@@ -39,22 +43,27 @@ class SearchSpace2(SearchSpace):
     def create_nasbench_adjacency_matrix_with_loose_ends(self, parents):
         return upscale_to_nasbench_format(self._create_adjacency_matrix_with_loose_ends(parents))
 
-    def sample(self):
-        adjacency_matrix_sample = self._sample_architecture(adjacency_matrix=np.zeros([6, 6]), node=OUTPUT_NODE - 1)
-
-        if self._check_validity_of_adjacency_matrix(adjacency_matrix_sample):
-            return adjacency_matrix_sample, random.choices(PRIMITIVES, k=4)
-        else:
-            raise ValueError('The sampled matrix is not from the search space {}'.format(adjacency_matrix_sample))
-
-    def sample_with_loose_ends(self):
-        adjacency_matrix_sample = self.sample_adjacency_matrix_with_loose_ends()
-        return adjacency_matrix_sample, random.choices(PRIMITIVES, k=4)
-
     def generate_adjacency_matrix_without_loose_ends(self):
         for adjacency_matrix in self._generate_adjacency_matrix(adjacency_matrix=np.zeros([6, 6]),
                                                                 node=OUTPUT_NODE - 1):
             yield upscale_to_nasbench_format(adjacency_matrix)
+
+    def objective_function(self, nasbench, config, budget=108):
+        adjacency_matrix, node_list = super(SearchSpace2, self).convert_config_to_nasbench_format(config)
+        # adjacency_matrix = upscale_to_nasbench_format(adjacency_matrix)
+        node_list = [INPUT, *node_list, CONV1X1, OUTPUT]
+        adjacency_list = adjacency_matrix.astype(np.int).tolist()
+        model_spec = api.ModelSpec(matrix=adjacency_list, ops=node_list)
+        nasbench_data = nasbench.query(model_spec, epochs=budget)
+
+        # record the data to history
+        architecture = Model()
+        arch = Architecture(adjacency_matrix=adjacency_matrix,
+                            node_list=node_list)
+        architecture.update_data(arch, nasbench_data, budget)
+        self.run_history.append(architecture)
+
+        return nasbench_data['validation_accuracy'], nasbench_data['training_time']
 
     def generate_with_loose_ends(self):
         for parent_node_2, parent_node_3, parent_node_4, output_parents in itertools.product(
@@ -71,32 +80,16 @@ class SearchSpace2(SearchSpace):
             adjacency_matrix = self.create_nasbench_adjacency_matrix_with_loose_ends(parents)
             yield adjacency_matrix
 
-    def sample_adjacency_matrix_with_loose_ends(self):
-        parent_node_2, parent_node_3, parent_node_4, output_parents = [random.sample(
-            list(itertools.combinations(list(range(int(node))), num_parents)), 1) for
-                                                                          node, num_parents in
-                                                                          self.num_parents_per_node.items()][
-                                                                      2:]
-        parents = {
-            '0': [],
-            '1': [0],
-            '2': parent_node_2,
-            '3': parent_node_3,
-            '4': parent_node_4,
-            '5': output_parents
-        }
-        adjacency_matrix = self._create_adjacency_matrix_with_loose_ends(parents)
-        return adjacency_matrix
-
 
 def analysis():
+    search_space_2 = SearchSpace2()
+    search_space_2.sample(with_loose_ends=False)
+
     # Load NASBench
     nasbench = NasbenchWrapper('nasbench_analysis/nasbench_data/108_e/nasbench_full.tfrecord')
 
     test_error = []
     valid_error = []
-
-    search_space_2 = SearchSpace2()
 
     for i in range(10000):
         adjacency_matrix, node_list = search_space_2.sample_with_loose_ends()

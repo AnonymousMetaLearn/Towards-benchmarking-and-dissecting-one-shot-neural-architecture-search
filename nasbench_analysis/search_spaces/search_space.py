@@ -1,14 +1,22 @@
-import itertools
-
 import copy
-import numpy as np
+import itertools
 import random
 from abc import abstractmethod
+
+import ConfigSpace
+import numpy as np
 from nasbench import api
 
-from nasbench_analysis.utils import CONV1X1, CONV3X3, MAXPOOL3X3, INPUT, \
-    OUTPUT
-from nasbench_analysis.utils import parent_combinations
+from nasbench_analysis.utils import CONV1X1, CONV3X3, MAXPOOL3X3, INPUT, OUTPUT, upscale_to_nasbench_format
+from nasbench_analysis.utils import parent_combinations as parent_combinations_old
+from optimizers.darts.genotypes import PRIMITIVES
+
+
+def parent_combinations(node, num_parents):
+    if node == 1 and num_parents == 1:
+        return [(0,)]
+    else:
+        return list(itertools.combinations(list(range(int(node))), num_parents))
 
 
 class SearchSpace:
@@ -17,25 +25,75 @@ class SearchSpace:
         self.num_intermediate_nodes = num_intermediate_nodes
         self.num_parents_per_node = {}
 
+        self.run_history = []
+
     @abstractmethod
     def create_nasbench_adjacency_matrix(self, parents, **kwargs):
         """Based on given connectivity pattern create the corresponding adjacency matrix."""
         pass
 
-    @abstractmethod
-    def sample(self, **kwargs):
-        """Sample a valid adjacency matrix from the search space without loose ends."""
-        pass
+    def sample(self, with_loose_ends, upscale=True):
+        if with_loose_ends:
+            adjacency_matrix_sample = self._sample_adjacency_matrix_with_loose_ends()
+        else:
+            adjacency_matrix_sample = self._sample_adjacency_matrix_without_loose_ends(
+                adjacency_matrix=np.zeros([self.num_intermediate_nodes + 2, self.num_intermediate_nodes + 2]),
+                node=self.num_intermediate_nodes + 1)
+            assert self._check_validity_of_adjacency_matrix(adjacency_matrix_sample), 'Incorrect graph'
 
-    @abstractmethod
-    def sample_with_loose_ends(self, **kwargs):
-        """Sample a valid adjacency matrix from the search space with loose ends."""
-        pass
+        if upscale and self.search_space_number in [1, 2]:
+            adjacency_matrix_sample = upscale_to_nasbench_format(adjacency_matrix_sample)
+        return adjacency_matrix_sample, random.choices(PRIMITIVES, k=self.num_intermediate_nodes)
+
+    def _sample_adjacency_matrix_with_loose_ends(self):
+        parents_per_node = [random.sample(list(itertools.combinations(list(range(int(node))), num_parents)), 1) for
+                            node, num_parents in self.num_parents_per_node.items()][2:]
+        parents = {
+            '0': [],
+            '1': [0]
+        }
+        for node, node_parent in enumerate(parents_per_node, 2):
+            parents[str(node)] = node_parent
+        adjacency_matrix = self._create_adjacency_matrix_with_loose_ends(parents)
+        return adjacency_matrix
+
+    def _sample_adjacency_matrix_without_loose_ends(self, adjacency_matrix, node):
+        req_num_parents = self.num_parents_per_node[str(node)]
+        current_num_parents = np.sum(adjacency_matrix[:, node], dtype=np.int)
+        num_parents_left = req_num_parents - current_num_parents
+        sampled_parents = \
+            random.sample(list(parent_combinations_old(adjacency_matrix, node, n_parents=num_parents_left)), 1)[0]
+        for parent in sampled_parents:
+            adjacency_matrix[parent, node] = 1
+            adjacency_matrix = self._sample_adjacency_matrix_without_loose_ends(adjacency_matrix, parent)
+        return adjacency_matrix
 
     @abstractmethod
     def generate_adjacency_matrix_without_loose_ends(self, **kwargs):
         """Returns every adjacency matrix in the search space without loose ends."""
         pass
+
+    def convert_config_to_nasbench_format(self, config):
+        parents = {node: config["choice_block_{}_parents".format(node)] for node in
+                   list(self.num_parents_per_node.keys())[1:]}
+        parents['0'] = []
+        adjacency_matrix = self.create_nasbench_adjacency_matrix_with_loose_ends(parents)
+        ops = [config["choice_block_{}_op".format(node)] for node in list(self.num_parents_per_node.keys())[1:-1]]
+        return adjacency_matrix, ops
+
+    def get_configuration_space(self):
+        cs = ConfigSpace.ConfigurationSpace()
+
+        for node in list(self.num_parents_per_node.keys())[1:-1]:
+            cs.add_hyperparameter(ConfigSpace.CategoricalHyperparameter("choice_block_{}_op".format(node),
+                                                                        [CONV1X1, CONV3X3, MAXPOOL3X3]))
+
+        for choice_block_index, num_parents in list(self.num_parents_per_node.items())[1:]:
+            cs.add_hyperparameter(
+                ConfigSpace.CategoricalHyperparameter(
+                    "choice_block_{}_parents".format(choice_block_index),
+                    parent_combinations(node=choice_block_index, num_parents=num_parents)))
+        return cs
 
     def generate_search_space_without_loose_ends(self):
         # Create all possible connectivity patterns
@@ -54,7 +112,7 @@ class SearchSpace:
                         ops.append(combination.pop())
                     else:
                         ops.append(CONV1X1)
-                assert (len(combination) == 0, 'Something is wrong')
+                assert len(combination) == 0, 'Something is wrong'
                 ops.append(OUTPUT)
 
                 # Create nested list from numpy matrix
@@ -78,7 +136,7 @@ class SearchSpace:
             current_num_parents = np.sum(adjacency_matrix[:, node], dtype=np.int)
             num_parents_left = req_num_parents - current_num_parents
 
-            for parents in parent_combinations(adjacency_matrix, node, n_parents=num_parents_left):
+            for parents in parent_combinations_old(adjacency_matrix, node, n_parents=num_parents_left):
                 # Make copy of adjacency matrix so that when it returns to this stack
                 # it can continue with the unmodified adjacency matrix
                 adjacency_matrix_copy = copy.copy(adjacency_matrix)
@@ -147,14 +205,3 @@ class SearchSpace:
             return False
 
         return True
-
-    def _sample_architecture(self, adjacency_matrix, node):
-        req_num_parents = self.num_parents_per_node[str(node)]
-        current_num_parents = np.sum(adjacency_matrix[:, node], dtype=np.int)
-        num_parents_left = req_num_parents - current_num_parents
-        sampled_parents = \
-            random.sample(list(parent_combinations(adjacency_matrix, node, n_parents=num_parents_left)), 1)[0]
-        for parent in sampled_parents:
-            adjacency_matrix[parent, node] = 1
-            adjacency_matrix = self._sample_architecture(adjacency_matrix, parent)
-        return adjacency_matrix

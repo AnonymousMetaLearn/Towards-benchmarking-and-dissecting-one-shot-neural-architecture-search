@@ -34,29 +34,28 @@ class ChoiceBlockGDAS(ChoiceBlock):
     International Conference on Machine Learning. 2018.
     """
 
-    def __init__(self, C_in, n_inputs):
-        super(ChoiceBlockGDAS, self).__init__(C_in, n_inputs)
+    def __init__(self, C_in):
+        super(ChoiceBlockGDAS, self).__init__(C_in)
         # Use the GDAS Mixed Op instead of the DARTS Mixed op
         self.mixed_op = MixedOpGDAS(C_in, stride=1)
 
 
 class CellGDAS(Cell):
 
-    def __init__(self, steps, multiplier, C_prev, C, layer, search_space):
-        super(CellGDAS, self).__init__(steps, multiplier, C_prev, C, layer, search_space)
+    def __init__(self, steps, C_prev, C, layer, search_space):
+        super(CellGDAS, self).__init__(steps, C_prev, C, layer, search_space)
         # Create the choice block.
         self._choice_blocks = nn.ModuleList()
         for i in range(self._steps):
             # Use the GDAS cell instead of the DARTS cell
-            choice_block = ChoiceBlockGDAS(C_in=C, n_inputs=i + 1)
+            choice_block = ChoiceBlockGDAS(C_in=C)
             self._choice_blocks.append(choice_block)
 
 
 class GDASNetwork(Network):
 
-    def __init__(self, tau, C, num_classes, layers, criterion, output_weights, search_space, steps=4, multiplier=5):
-        super(GDASNetwork, self).__init__(C, num_classes, layers, criterion, output_weights, search_space, steps=steps,
-                                          multiplier=multiplier)
+    def __init__(self, tau, C, num_classes, layers, criterion, output_weights, search_space, steps=4):
+        super(GDASNetwork, self).__init__(C, num_classes, layers, criterion, output_weights, search_space, steps=steps)
         self.tau = tau
 
         # Override the cells module list of DARTS with GDAS variants
@@ -69,7 +68,7 @@ class GDASNetwork(Network):
                 # Down-sample in forward method
                 C_curr *= 2
 
-            cell = CellGDAS(steps, multiplier, C_prev, C_curr, layer=i, search_space=search_space)
+            cell = CellGDAS(steps, C_prev, C_curr, layer=i, search_space=search_space)
             self.cells += [cell]
             C_prev = C_curr
 
@@ -84,7 +83,7 @@ class GDASNetwork(Network):
             x.data.copy_(y.data)
         return model_new
 
-    def forward(self, input, discrete=False):
+    def forward(self, input, discrete=False, normalize=False):
         # NASBench only has one input to each cell
         s0 = self.stem(input)
         for i, cell in enumerate(self.cells):
@@ -108,7 +107,7 @@ class GDASNetwork(Network):
             s0 = cell(s0, mixed_op_weights, output_weights, input_weights)
 
         # Include one more preprocessing step here
-        s0 = self.postprocess(s0)  # [N, C_max * multiplier, w, h] -> [N, C_max, w, h]
+        s0 = self.postprocess(s0)  # [N, C_max * (steps + 1), w, h] -> [N, C_max, w, h]
 
         # Global Average Pooling by averaging over last two remaining spatial dimensions
         # Like in nasbench: https://github.com/google-research/nasbench/blob/master/nasbench/lib/model_builder.py#L92

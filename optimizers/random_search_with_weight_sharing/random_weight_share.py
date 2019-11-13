@@ -215,7 +215,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Args for SHA with weight sharing')
     parser.add_argument('--benchmark', dest='benchmark', type=str, default='cnn')
     parser.add_argument('--seed', dest='seed', type=int, default=100)
-    parser.add_argument('--epochs', dest='epochs', type=int, default=100)
+    parser.add_argument('--epochs', dest='epochs', type=int, default=50)
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=64)
     parser.add_argument('--grad_clip', dest='grad_clip', type=float, default=0.25)
     parser.add_argument('--save_dir', dest='save_dir', type=str, default=None)

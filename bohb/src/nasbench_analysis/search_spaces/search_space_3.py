@@ -39,7 +39,7 @@ class SearchSpace3(SearchSpace):
         return self._create_adjacency_matrix_with_loose_ends(parents)
 
     def sample(self):
-        adjacency_matrix_sample = self._sample_architecture(adjacency_matrix=np.zeros([7, 7]), node=OUTPUT_NODE)
+        adjacency_matrix_sample = self._sample_adjacency_matrix_without_loose_ends(adjacency_matrix=np.zeros([7, 7]), node=OUTPUT_NODE)
 
         if self._check_validity_of_adjacency_matrix(adjacency_matrix_sample):
             return adjacency_matrix_sample, random.choices(PRIMITIVES, k=5)
@@ -89,7 +89,7 @@ class SearchSpace3(SearchSpace):
 
 def analysis():
     # Load NASBench
-    nasbench = NasbenchWrapper('/home/data/nasbench_full.tfrecord')
+    nasbench = NasbenchWrapper('/home/ANONYMOUS/data/nasbench_full.tfrecord')
 
     test_error = []
     valid_error = []

@@ -98,7 +98,7 @@ parser = argparse.ArgumentParser("correlation_analysis")
 parser.add_argument('--data', type=str, default='../data', help='location of the darts corpus')
 parser.add_argument('--model_path', default="experiments/darts/search_space_1/search-baseline-20190821-171946-0-1",
                     help='Path to where the models are stored.')
-parser.add_argument('--epoch', type=int, help='batch size')
+parser.add_argument('--epoch', type=int, help='Epoch')
 args = parser.parse_args()
 
 if __name__ == '__main__':

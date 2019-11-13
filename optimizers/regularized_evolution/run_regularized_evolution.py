@@ -21,65 +21,14 @@ import os
 import pickle
 import random
 
-import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 from nasbench import api
 
+from optimizers.utils import Model, Architecture
 from nasbench_analysis.search_spaces.search_space_1 import SearchSpace1
 from nasbench_analysis.search_spaces.search_space_2 import SearchSpace2
 from nasbench_analysis.search_spaces.search_space_3 import SearchSpace3
-from nasbench_analysis.utils import upscale_to_nasbench_format, INPUT, OUTPUT, CONV1X1, CONV3X3, \
-    MAXPOOL3X3
-
-sns.set_style('whitegrid')
-
-Architecture = collections.namedtuple('Architecture', ['adjacency_matrix', 'node_list'])
-
-
-class Model(object):
-    """A class representing a model.
-
-    It holds two attributes: `arch` (the simulated architecture) and `accuracy`
-    (the simulated accuracy / fitness). See Appendix C for an introduction to
-    this toy problem.
-
-    In the real case of neural networks, `arch` would instead hold the
-    architecture of the normal and reduction cells of a neural network and
-    accuracy would be instead the result of training the neural net and
-    evaluating it on the validation set.
-
-    We do not include test accuracies here as they are not used by the algorithm
-    in any way. In the case of real neural networks, the test accuracy is only
-    used for the purpose of reporting / plotting final results.
-
-    In the context of evolutionary algorithms, a model is often referred to as
-    an "individual".
-
-    Attributes:  (as in the original code)
-      arch: the architecture as an int representing a bit-string of length `DIM`.
-          As a result, the integers are required to be less than `2**DIM`. They
-          can be visualized as strings of 0s and 1s by calling `print(model)`,
-          where `model` is an instance of this class.
-      accuracy:  the simulated validation accuracy. This is the sum of the
-          bits in the bit-string, divided by DIM to produce a value in the
-          interval [0.0, 1.0]. After that, a small amount of Gaussian noise is
-          added with mean 0.0 and standard deviation `NOISE_STDEV`. The resulting
-          number is clipped to within [0.0, 1.0] to produce the final validation
-          accuracy of the model. A given model will have a fixed validation
-          accuracy but two models that have the same architecture will generally
-          have different validation accuracies due to this noise. In the context
-          of evolutionary algorithms, this is often known as the "fitness".
-    """
-
-    def __init__(self):
-        self.arch = None
-        self.accuracy = None
-        self.training_time = None
-
-    def __str__(self):
-        """Prints a readable version of this bitstring."""
-        return '{0:b}'.format(self.arch)
+from nasbench_analysis.utils import upscale_to_nasbench_format, INPUT, OUTPUT, CONV1X1, CONV3X3, MAXPOOL3X3
 
 
 def train_and_eval(config):
@@ -93,7 +42,7 @@ def train_and_eval(config):
     adjacency_list = adjacency_matrix.astype(np.int).tolist()
     model_spec = api.ModelSpec(matrix=adjacency_list, ops=node_list)
     nasbench_data = nasbench.query(model_spec)
-    return nasbench_data['validation_accuracy'], nasbench_data['training_time']
+    return nasbench_data['validation_accuracy'], nasbench_data['test_accuracy'], nasbench_data['training_time']
 
 
 def random_architecture():
@@ -161,7 +110,7 @@ def regularized_evolution(cycles, population_size, sample_size):
     while len(population) < population_size:
         model = Model()
         model.arch = random_architecture()
-        model.accuracy, model.training_time = train_and_eval(model.arch)
+        model.validation_accuracy, model.test_accuracy, model.training_time = train_and_eval(model.arch)
         population.append(model)
         history.append(model)
 
@@ -178,12 +127,12 @@ def regularized_evolution(cycles, population_size, sample_size):
             sample.append(candidate)
 
         # The parent is the best model in the sample.
-        parent = max(sample, key=lambda i: i.accuracy)
+        parent = max(sample, key=lambda i: i.validation_accuracy)
 
         # Create the child model and store it.
         child = Model()
         child.arch = mutate_arch(parent.arch)
-        child.accuracy, child.training_time = train_and_eval(child.arch)
+        child.validation_accuracy, child.test_accuracy, child.training_time = train_and_eval(child.arch)
         population.append(child)
         history.append(child)
 
@@ -198,61 +147,71 @@ def random_search(cycles):
     for i in range(cycles):
         model = Model()
         model.arch = random_architecture()
-        model.accuracy, model.training_time = train_and_eval(model.arch)
+        model.validation_accuracy, model.test_accuracy, model.training_time = train_and_eval(model.arch)
         history.append(model)
     return history
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--run_id', default=0, type=int, nargs='?', help='unique number to identify this run')
-parser.add_argument('--algorithm', default='RE', choices=['RE', 'RS'])
+parser.add_argument('--algorithm', default=None, type=str)
 parser.add_argument('--search_space', default="1", type=str, nargs='?', help='specifies the benchmark')
 parser.add_argument('--n_iters', default=280, type=int, nargs='?', help='number of iterations for optimization method')
-parser.add_argument('--output_path', default="./", type=str, nargs='?',
+parser.add_argument('--output_path', default="./experiments", type=str, nargs='?',
                     help='specifies the path where the results will be saved')
-parser.add_argument('--data_dir', default="nasbench_analysis/nasbench_data/108_e/nasbench_full.tfrecord", type=str,
+parser.add_argument('--data_dir',
+                    default="nasbench_analysis/nasbench_data/108_e/nasbench_only108.tfrecord", type=str,
                     nargs='?', help='specifies the path to the nasbench data')
 parser.add_argument('--pop_size', default=100, type=int, nargs='?', help='population size')
 parser.add_argument('--sample_size', default=10, type=int, nargs='?', help='sample_size')
 parser.add_argument('--seed', default=0, type=int, help='random seed')
+parser.add_argument('--n_repetitions', default=500, type=int, help='number of repetitions')
 
 args = parser.parse_args()
 nasbench = api.NASBench(args.data_dir)
-if args.search_space == "1":
-    search_space = SearchSpace1()
-elif args.search_space == "2":
-    search_space = SearchSpace2()
-elif args.search_space == "3":
-    search_space = SearchSpace3()
+#if args.search_space == "1":
+#    search_space = SearchSpace1()
+#elif args.search_space == "2":
+#    search_space = SearchSpace2()
+#elif args.search_space == "3":
+#    search_space = SearchSpace3()
+#else:
+#    raise ValueError('Unknown search space')
+
+if args.search_space is None:
+    spaces = [1, 2, 3]
 else:
-    raise ValueError('Unknown search space')
+    spaces = [int(args.search_space)]
 
-for seed in range(6):
-    np.random.seed(seed)
-    output_path = os.path.join(args.output_path, "regularized_evolution")
-    os.makedirs(os.path.join(output_path), exist_ok=True)
+if args.algorithm is None:
+    algos = ['RE', 'RS']
+else:
+    algos = [args.algorithm]
 
-    # Set random_seed
-    if args.algorithm == 'RE':
-        history = regularized_evolution(
-            cycles=args.n_iters, population_size=args.pop_size, sample_size=args.sample_size)
-    else:
-        history = random_search(cycles=args.n_iters)
 
-    plt.figure()
-    for idx, arch in enumerate(history):
-        plt.scatter(idx, 1 - arch.accuracy - search_space.valid_min_error)
+for space in spaces:
+    search_space = eval('SearchSpace{}()'.format(space))
+    for alg in algos:
+        print("##### Algorithm {} #####".format(alg))
+        for seed in range(args.n_repetitions):
+            print("##### Seed {} #####".format(seed))
+            np.random.seed(seed)
+            output_path = os.path.join(args.output_path, "discrete_optimizers")
+            os.makedirs(os.path.join(output_path), exist_ok=True)
 
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    ax = plt.gca()
-    ax.set_yscale('log')
-    plt.xlabel('Iteration')
-    plt.ylabel('Validation regret')
-    plt.title('Search Space {}'.format(args.search_space))
-    plt.savefig('test_re_ss_{}_seed_{}.pdf'.format(args.search_space, seed))
-    plt.close()
-    fh = open(os.path.join(output_path,
-                           'algo_{}_{}_ssp_{}_seed_{}.obj'.format(args.algorithm, args.run_id, args.search_space,
-                                                                  seed)), 'wb')
-    pickle.dump(history, fh)
-    fh.close()
+            # Set random_seed
+            if alg == 'RE':
+                history = regularized_evolution(
+                    cycles=args.n_iters, population_size=args.pop_size, sample_size=args.sample_size)
+            else:
+                history = random_search(cycles=args.n_iters)
+
+            fh = open(os.path.join(output_path,
+                                   'algo_{}_{}_ssp_{}_seed_{}.obj'.format(alg,
+                                                                          args.run_id,
+                                                                          space,
+                                                                          seed)), 'wb')
+            pickle.dump(history, fh)
+            fh.close()
+
+            print(min([1 - arch.test_accuracy - search_space.test_min_error for arch in history]))

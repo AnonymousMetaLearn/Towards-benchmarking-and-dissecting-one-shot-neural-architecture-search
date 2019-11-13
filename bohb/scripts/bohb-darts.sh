@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # submit to the right queue
-#SBATCH -p rtx2080
+#SBATCH -p bosch_gpu-rtx2080
 #SBATCH --gres gpu:1
 #SBATCH --array=1-16
 #SBATCH -J bohb-darts
